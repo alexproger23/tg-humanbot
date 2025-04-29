@@ -3,7 +3,7 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"  # Отключает пре
 
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
 
 from gpt.gpt import GPT_inference
 from gpt.dataset import PromptDataset
@@ -20,6 +20,6 @@ def creatingGPTexamples(model, tokenizer):
 
 if __name__ == "__main__":
 
-    model = "ai-forever/rugpt3medium_based_on_gpt2" # "gpt2"
+    model = "ai-forever/rugpt3large_based_on_gpt2" # "gpt2"
 
     creatingGPTexamples(AutoModelForCausalLM.from_pretrained(model), AutoTokenizer.from_pretrained(model))
