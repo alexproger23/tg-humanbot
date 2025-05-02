@@ -23,11 +23,8 @@ def get_dialog(client, target):
             user_entity = dialog.entity
             break
 
-    try:
-        pass
-        #messages = list(client.iter_messages(user_entity, reverse=True))
-    except Exception as e:
-        print("User not found")
+    if user_entity is None:
+        print(f"User {target} not found")
         return None
 
     return user_entity
@@ -40,14 +37,40 @@ if __name__ == "__main__":
     target_users = ["Руслан"]
 
     for target_user in target_users:
-        messages.append(get_dialog(tgclient, target_user))
+        entity = get_dialog(tgclient, target_user)
+        if entity is not None:
+            messages.append(entity)
 
-    with open("chat_history.txt", "w", encoding="utf-8") as txt_file:
-        for message in tqdm(tgclient.iter_messages(messages[0], reverse=True)):
-            print(message)
-            if message.text and not message.fwd_from:  # фильтруем пустые или медиа-сообщения
-                if "'''" not in message.text and "https://" not in message.text:
-                    # записывать в два файла 1. сплошной текст 2. размеченный на 1 сообщение 2 сообщение
-                    txt_file.write(f"[{message.date}] {message.sender_id}: {message.text}\n")
+    i = 0
+    with (open("train_data/solid_chat.txt", "w", encoding="utf-8") as solidtext,
+          open("train_data/split_chat.txt", "w", encoding="utf-8") as qa_text):
+        for chat in messages:
+            last_sender = None
+            f = 1
+            for message in tqdm(tgclient.iter_messages(chat, reverse=True)):
+                if message.text and not message.fwd_from:  # фильтруем пустые или медиа-сообщения
+                    if "```" not in message.text and "https://" not in message.text:
+                        if last_sender is None:
+                            solidtext.write("</s>")
+                            qa_text.write("</user1>")
+                        elif message.sender_id != last_sender:
+                            solidtext.write("</s>\n</s>")
+                            if f:
+                                qa_text.write("</user1>\n</user2>")
+                                f = 0
+                            else:
+                                qa_text.write("</user2>\n</user1>")
+                                f = 1
+                        else:
+                            solidtext.write(" ")
+                            qa_text.write(" ")
 
-    print("Сохранено в chat_history.txt")
+                        solidtext.write(message.text.lower())
+                        qa_text.write(message.text.lower())
+                        last_sender = message.sender_id
+
+            solidtext.write("</s>")
+            if f:
+                qa_text.write("</user1>")
+            else:
+                qa_text.write("</user2>")
