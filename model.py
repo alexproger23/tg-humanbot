@@ -1,10 +1,12 @@
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
+from tokenizers import Tokenizer, models, trainers, pre_tokenizers, processors
 from torch import nn
+from datasets import load_dataset
 
 
 class FineTunnedGPT:
     def __init__(self, model: str):
-        self.tokenizer = GPT2Tokenizer.from_pretrained(model)
+        self.tokenizer = Tokenizer(models.BPE(unk_token="<UNK>"))
         self.model = GPT2LMHeadModel.from_pretrained(model)
 
         self.freeze_model_layers()
@@ -28,3 +30,35 @@ class FineTunnedGPT:
                 param.requires_grad = True
             else:
                 param.requires_grad = False
+
+
+    def train_tokenizer(self, path, special=["</s>"]):
+        self.tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
+        special_tokens = ["<UNK>"] + special
+
+        trainer = trainers.BpeTrainer(
+            vocab_size=10000,
+            min_frequency=3,
+            special_tokens=special_tokens
+        )
+
+        def file_iterator(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    yield line.strip()
+
+        self.tokenizer.train_from_iterator(file_iterator(path), trainer=trainer)
+        self.tokenizer.save("save_models\\tokenizer_model.json")
+
+
+    def train(self, path):      # доделать обучени итерационный датасет, токенизирует перед склеиванием в батч, обучение ручками
+        self.model.train()
+
+        dataset = load_dataset("text", data_files="path/to/large_file.txt", streaming=True)
+
+        for example in dataset["train"]:
+            text = example["text"]
+            # Токенизация на лету
+            inputs = self.tokenizer(text, truncation=True, max_length=128)
+            yield inputs  # или обработка батчами
+

@@ -7,6 +7,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
 
 from gpt.gpt import GPT_inference
 from gpt.dataset import PromptDataset
+from model import FineTunnedGPT
 
 def creatingGPTexamples(model, tokenizer):
     if not tokenizer.pad_token:
@@ -22,4 +23,8 @@ if __name__ == "__main__":
 
     model = "ai-forever/rugpt3large_based_on_gpt2" # "gpt2"
 
-    creatingGPTexamples(AutoModelForCausalLM.from_pretrained(model), AutoTokenizer.from_pretrained(model))
+    #creatingGPTexamples(AutoModelForCausalLM.from_pretrained(model), AutoTokenizer.from_pretrained(model))
+
+    ftgpt = FineTunnedGPT("gpt2")
+    ftgpt.train_tokenizer("tg-parser/train_data/solid_chat.txt")
+    print(ftgpt.tokenizer.get_vocab())
