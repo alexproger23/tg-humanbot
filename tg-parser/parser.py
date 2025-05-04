@@ -51,10 +51,9 @@ if __name__ == "__main__":
                 if message.text and not message.fwd_from:  # фильтруем пустые или медиа-сообщения
                     if "```" not in message.text and "https://" not in message.text:
                         if last_sender is None:
-                            solidtext.write("</s>")
                             qa_text.write("</user1>")
                         elif message.sender_id != last_sender:
-                            solidtext.write("</s>\n</s>")
+                            solidtext.write("\n")
                             if f:
                                 qa_text.write("</user1>\n</user2>")
                                 f = 0
@@ -69,7 +68,6 @@ if __name__ == "__main__":
                         qa_text.write(message.text.lower())
                         last_sender = message.sender_id
 
-            solidtext.write("</s>")
             if f:
                 qa_text.write("</user1>")
             else:

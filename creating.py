@@ -27,4 +27,6 @@ if __name__ == "__main__":
 
     ftgpt = FineTunnedGPT("gpt2")
     ftgpt.train_tokenizer("tg-parser/train_data/solid_chat.txt")
-    print(ftgpt.tokenizer.get_vocab())
+
+    encoded_input = ftgpt.tokenizer(["пример", "еще один пример"])
+    print(encoded_input[0])
