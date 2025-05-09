@@ -1,6 +1,6 @@
 import torch
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
-from transformers import PreTrainedTokenizerFast
+from transformers import PreTrainedTokenizerFast, AutoModelForCausalLM
 from tokenizers import Tokenizer, models, trainers, pre_tokenizers, processors
 from torch.utils.data import IterableDataset, DataLoader
 from torch import nn
@@ -20,14 +20,14 @@ class TrainDataset(IterableDataset):
                 yield self.process(f)
 
     def process(self, file):
-        question = file.readline()
+        question = "<user1>" + file.readline() + "<user1>"
         answer = file.readline()
-        text = "<user1>" + question + '<user1>' + "<user2>" + answer + "<eos>"
+        text = question + "<user2>" + answer + "<eos>"
         encoded = self.tokenizer(text.lower(), padding="max_length", max_length=512, truncation=True,
                                  return_tensors="pt")
         ids = encoded["input_ids"].squeeze(0)
         attention_mask = encoded["attention_mask"].squeeze(0)
-        question_len = len(self.tokenizer(text.lower(), padding="max_length", max_length=512, truncation=True,
+        question_len = len(self.tokenizer(question.lower(), padding="max_length", max_length=512, truncation=True,
                                  return_tensors="pt"))
         labels = ids.clone()
         labels[:question_len] = -100
@@ -73,24 +73,26 @@ class FineTunnedGPT:
 
 
     def train_tokenizer(self, path):
-        self.tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
-        special_tokens = ["<unk>"] + ["<user2>", "<user1>", "<eos>"]
+        save_path = "save_models\\tokenizer_model.json"
+        if not os.path.exists(save_path):
+            self.tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
+            special_tokens = ["<unk>"] + ["<user2>", "<user1>", "<eos>"]
 
-        trainer = trainers.BpeTrainer(
-            vocab_size=self.model.config.vocab_size,
-            min_frequency=2,
-            special_tokens=special_tokens
-        )
+            trainer = trainers.BpeTrainer(
+                vocab_size=self.model.config.vocab_size,
+                min_frequency=2,
+                special_tokens=special_tokens
+            )
 
-        def file_iterator(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    yield line.strip()
+            def file_iterator(file_path):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        yield line.strip()
 
-        self.tokenizer.train_from_iterator(file_iterator(path), trainer=trainer)
+            self.tokenizer.train_from_iterator(file_iterator(path), trainer=trainer)
 
-        self.tokenizer.save("save_models\\tokenizer_model.json")
-        self.tokenizer = PreTrainedTokenizerFast(tokenizer_file="save_models\\tokenizer_model.json")
+            self.tokenizer.save(save_path)
+        self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=save_path)
 
         self.tokenizer.model_max_length = 1024
         self.tokenizer.padding_side = "right"
@@ -104,41 +106,49 @@ class FineTunnedGPT:
 
         self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
-    def train(self, pathes, epoch=5, device="cuda"):
-        self.model = self.model.to(device)
-        self.model.train()
+    def train(self, pathes, epoch=5, lr=0.001, force_train=False, device="cuda"):
+        save_path = "save_models\\finetune_gpt2"
+        if force_train or not os.path.exists(save_path):
+            self.model = self.model.to(device)
+            self.model.train()
 
-        dataset = TrainDataset(pathes, self.tokenizer)
-        dataloader = DataLoader(dataset, batch_size=2)
-        optimizer = optim.Adam(self.trainable_parameters, lr=0.001)
+            dataset = TrainDataset(pathes, self.tokenizer)
+            dataloader = DataLoader(dataset, batch_size=2)
+            optimizer = optim.Adam(self.trainable_parameters, lr=lr)
 
-        progress_bar = tqdm(range(epoch), desc="Epoch", leave=False)
-        for ep in progress_bar:
-            for ids, mask, labels in dataloader:
-                ids = ids.to(device)
-                mask = mask.to(device)
-                labels = labels.to(device)
-                output = self.model(input_ids=ids, attention_mask=mask, labels=labels, past_key_values=None)
-                loss = output.loss
-                loss.backward()
-                self.train_loss.append(loss.item())
+            progress_bar = tqdm(range(epoch), desc="Epoch", leave=False)
+            for ep in progress_bar:
+                for ids, mask, labels in dataloader:
+                    ids = ids.to(device)
+                    mask = mask.to(device)
+                    labels = labels.to(device)
+                    output = self.model(input_ids=ids, attention_mask=mask, labels=labels, past_key_values=None)
+                    loss = output.loss
+                    loss.backward()
+                    self.train_loss.append(loss.item())
 
-                optimizer.step()
-                optimizer.zero_grad()
+                    optimizer.step()
+                    optimizer.zero_grad()
 
-            progress_bar.write(f"Loss: {self.train_loss[-1]}")
+                progress_bar.write(f"Loss: {self.train_loss[-1]}")
 
-        #self.model.save("save_models\\finetune_gpt2.json")
+            self.model.save_pretrained(save_path)
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(save_path)
 
-    def inference(self, prompt):
+    def inference(self, prompt, max_prompt_len=128):
         prompt = "<user1>" + prompt.lower() + "<user1>"
-        encoded = self.tokenizer(prompt, padding="max_length", max_length=512, truncation=True,
+        encoded = self.tokenizer(prompt, padding="max_length", max_length=max_prompt_len, truncation=True,
                                  return_tensors="pt")
+
+        assert self.tokenizer.eos_token_id == self.model.config.eos_token_id, "error, eos token"
+        assert max_prompt_len <= 512, "error, max prompt len too long"
+
         with torch.no_grad():
             outputs = self.model.generate(
                 encoded["input_ids"],
                 attention_mask=encoded["attention_mask"],  # важно передать attention_mask если есть паддинг!
-                max_length=1024,
+                max_length=max_prompt_len*2,
                 pad_token_id=self.tokenizer.pad_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
                 early_stopping=True,
@@ -148,6 +158,6 @@ class FineTunnedGPT:
                 top_k=50,
                 top_p=0.95
             )
-        print(outputs.tolist())
-        answer = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        outputs = outputs.tolist()[0][max_prompt_len:]
+        answer = self.tokenizer.decode(outputs, skip_special_tokens=True)
         return answer
