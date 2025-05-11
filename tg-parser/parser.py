@@ -30,6 +30,8 @@ def get_dialog(client, target):
     return user_entity
 
 if __name__ == "__main__":
+    os.makedirs("train_data", exist_ok=True)
+
     tgclient = TelegramClient(*get_env())
     tgclient.start()
 
@@ -51,14 +53,14 @@ if __name__ == "__main__":
                 if message.text and not message.fwd_from:  # фильтруем пустые или медиа-сообщения
                     if "```" not in message.text and "https://" not in message.text:
                         if last_sender is None:
-                            qa_text.write("</user1>")
+                            qa_text.write("<user1>")
                         elif message.sender_id != last_sender:
                             solidtext.write("\n")
                             if f:
-                                qa_text.write("</user1>\n</user2>")
+                                qa_text.write("<user1>\n<user2>")
                                 f = 0
                             else:
-                                qa_text.write("</user2>\n</user1>")
+                                qa_text.write("<user2>\n<user1>")
                                 f = 1
                         else:
                             solidtext.write(" ")
@@ -69,6 +71,6 @@ if __name__ == "__main__":
                         last_sender = message.sender_id
 
             if f:
-                qa_text.write("</user1>")
+                qa_text.write("<user1>")
             else:
-                qa_text.write("</user2>")
+                qa_text.write("<user2>")

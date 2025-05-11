@@ -16,6 +16,7 @@ def creatingGPTexamples(model, tokenizer):
     inference_dataset = PromptDataset("data\\prompts.txt", tokenizer)
     inference_dataloader = DataLoader(inference_dataset, batch_size=1)
 
+    os.makedirs("output", exist_ok=True)
     GPT_inference(model, tokenizer, inference_dataloader, "output/gpt_results.txt", max_new_len=40)
 
 

@@ -178,5 +178,7 @@ cython_debug/
 .session
 *.session
 
+output
+train_data
 save_models
 # output

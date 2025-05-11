@@ -5,10 +5,10 @@ from tokenizers import Tokenizer, models, trainers, pre_tokenizers, processors
 from torch.utils.data import IterableDataset, DataLoader
 from torch import nn
 from torch import optim
+from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 import os
 
-from dataset import TrainDataset
 
 class FineTunnedGPT:
     def __init__(self, model: str):
@@ -51,7 +51,9 @@ class FineTunnedGPT:
 
 
     def train_tokenizer(self, path):
-        save_path = "save_models\\tokenizer_model.json"
+        os.makedirs("save_models", exist_ok=True)
+        save_path = r"save_models\tokenizer_model.json"
+
         if not os.path.exists(save_path):
             self.tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
             special_tokens = ["<unk>"] + ["<user2>", "<user1>", "<eos>"]
@@ -90,32 +92,54 @@ class FineTunnedGPT:
               epoch=5,
               lr=0.001,
               force_train=False,
-              device="cuda"):
-        save_path = "save_models\\finetune_gpt2"
+              device="cpu"):
+
+        assert torch.device("cuda") == torch.device("cuda" if torch.cuda.is_available() else "cpu"), "Error, wrong device"
+
+        os.makedirs("save_models", exist_ok=True)
+        save_path = r"save_models\finetune_gpt2"
+
+        if device == "cuda":
+            scaler = GradScaler()
+
         if force_train or not os.path.exists(save_path):
             self.model = self.model.to(device)
             self.model.train()
 
-            dataloader = DataLoader(dataset, batch_size=2)
+            dataloader = DataLoader(dataset,
+                                    batch_size=4,
+                                    num_workers=4,
+                                    pin_memory=True)
             optimizer = optim.Adam(self.trainable_parameters, lr=lr)
 
-            progress_bar = tqdm(range(epoch), desc="Epoch", dynamic_ncols=True)
-            for ep in progress_bar:
-                for ids, mask, labels in tqdm(dataloader, desc="Iter", total=len(dataloader)):
+            epoch_progress_bar = tqdm(range(epoch), desc="Epoch", dynamic_ncols=True)
+            iter_progress_bar = tqdm(dataloader, desc="Iter", total=len(dataloader), leave=False, dynamic_ncols=True)
+            for ep in epoch_progress_bar:
+                for ids, mask, labels in iter_progress_bar:
                     ids = ids.to(device)
                     mask = mask.to(device)
                     labels = labels.to(device)
-                    output = self.model(input_ids=ids, attention_mask=mask, labels=labels, past_key_values=None)
-                    loss = output.loss
-                    loss.backward()
+
+                    with autocast(enabled=torch.cuda.is_available()):
+                        output = self.model(input_ids=ids, attention_mask=mask, labels=labels, past_key_values=None)
+                        loss = output.loss
+
+                    if device == "cuda":
+                        scaler.scale(loss).backward()
+
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        loss.backward()
+
+                        optimizer.step()
+                        optimizer.zero_grad()
+
                     self.train_loss.append(loss.item())
 
-                    optimizer.step()
-                    optimizer.zero_grad()
+                epoch_progress_bar.set_postfix(loss=self.train_loss[-1])
 
-                progress_bar.set_postfix(loss=self.train_loss[-1])
-
-            self.model.save_pretrained(save_path)
+                self.model.save_pretrained(save_path)
         else:
             self.model = AutoModelForCausalLM.from_pretrained(save_path)
 

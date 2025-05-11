@@ -13,7 +13,7 @@ if __name__ == "__main__":
     ftgpt.train_tokenizer("tg-parser/train_data/solid_chat.txt")
 
     dataset = TrainDataset(["tg-parser/train_data/solid_chat.txt"], ftgpt.tokenizer)
-    ftgpt.train(dataset, 3, force_train=True, device="cpu")
+    ftgpt.train(dataset, 3, force_train=True, device="cuda")
 
     prompt = "бро"
     answer = ftgpt.inference(prompt)
