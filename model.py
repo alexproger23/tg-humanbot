@@ -1,6 +1,6 @@
 import torch
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
-from transformers import PreTrainedTokenizerFast, AutoModelForCausalLM
+from transformers import PreTrainedTokenizerFast, AutoModelForCausalLM, AutoConfig
 from tokenizers import Tokenizer, models, trainers, pre_tokenizers, processors
 from torch.utils.data import IterableDataset, DataLoader
 from torch import nn
@@ -8,39 +8,17 @@ from torch import optim
 from tqdm import tqdm
 import os
 
-
-class TrainDataset(IterableDataset):
-    def __init__(self, pathes, tokenizer):
-        self.pathes = pathes
-        self.tokenizer = tokenizer
-
-    def __iter__(self):
-        for path in self.pathes:
-            with open(path, "r", encoding="utf-8") as f:
-                yield self.process(f)
-
-    def process(self, file):
-        question = "<user1>" + file.readline() + "<user1>"
-        answer = file.readline()
-        text = question + "<user2>" + answer + "<eos>"
-        encoded = self.tokenizer(text.lower(), padding="max_length", max_length=512, truncation=True,
-                                 return_tensors="pt")
-        ids = encoded["input_ids"].squeeze(0)
-        attention_mask = encoded["attention_mask"].squeeze(0)
-        question_len = len(self.tokenizer(question.lower(), padding="max_length", max_length=512, truncation=True,
-                                 return_tensors="pt"))
-        labels = ids.clone()
-        labels[:question_len] = -100
-
-        return ids, attention_mask, labels
-
+from dataset import TrainDataset
 
 class FineTunnedGPT:
     def __init__(self, model: str):
         self.tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))
-        self.model = GPT2LMHeadModel.from_pretrained(model)
-        self.model.loss_type = 'ForCausalLMLoss'
-        self.model.config.loss_type = 'ForCausalLMLoss'
+        config = AutoConfig.from_pretrained(model)
+        config_dict = config.to_dict()
+        if "loss_type" in config_dict:
+            del config_dict["loss_type"]
+        new_config = config.__class__(**config_dict)
+        self.model = GPT2LMHeadModel.from_pretrained(model, config=new_config)
 
         self.trainable_parameters = []
         self.freeze_model_layers()
@@ -65,7 +43,7 @@ class FineTunnedGPT:
 
         for name, param in self.model.named_parameters():
             #bool_head = sum(("h." + str(head)) in name for head in heads)
-            if unfreeze in name: #or bool_head:
+            if unfreeze in name:# or bool_head:
                 param.requires_grad = True
                 self.trainable_parameters.append(param)
             else:
@@ -104,21 +82,26 @@ class FineTunnedGPT:
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.tokenizer.additional_special_tokens = ["<user1>", "<user2>"]
 
+        self.model.config.eos_token_id = self.tokenizer.eos_token_id
         self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
-    def train(self, pathes, epoch=5, lr=0.001, force_train=False, device="cuda"):
+    def train(self,
+              dataset,
+              epoch=5,
+              lr=0.001,
+              force_train=False,
+              device="cuda"):
         save_path = "save_models\\finetune_gpt2"
         if force_train or not os.path.exists(save_path):
             self.model = self.model.to(device)
             self.model.train()
 
-            dataset = TrainDataset(pathes, self.tokenizer)
             dataloader = DataLoader(dataset, batch_size=2)
             optimizer = optim.Adam(self.trainable_parameters, lr=lr)
 
-            progress_bar = tqdm(range(epoch), desc="Epoch", leave=False)
+            progress_bar = tqdm(range(epoch), desc="Epoch", dynamic_ncols=True)
             for ep in progress_bar:
-                for ids, mask, labels in dataloader:
+                for ids, mask, labels in tqdm(dataloader, desc="Iter", total=len(dataloader)):
                     ids = ids.to(device)
                     mask = mask.to(device)
                     labels = labels.to(device)
@@ -130,7 +113,7 @@ class FineTunnedGPT:
                     optimizer.step()
                     optimizer.zero_grad()
 
-                progress_bar.write(f"Loss: {self.train_loss[-1]}")
+                progress_bar.set_postfix(loss=self.train_loss[-1])
 
             self.model.save_pretrained(save_path)
         else:
@@ -156,7 +139,10 @@ class FineTunnedGPT:
                 num_return_sequences=1,
                 do_sample=True,
                 top_k=50,
-                top_p=0.95
+                top_p=0.95,
+                repetition_penalty=1.2,
+                no_repeat_ngram_size=2,
+                temperature=0.9
             )
         outputs = outputs.tolist()[0][max_prompt_len:]
         answer = self.tokenizer.decode(outputs, skip_special_tokens=True)

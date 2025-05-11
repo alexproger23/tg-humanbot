@@ -1,17 +1,28 @@
-from model import FineTunnedGPT
+import os
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"  # Отключает предупреждение
+from datasets import load_dataset
 
+from model import FineTunnedGPT
+from dataset import TrainDataset
 
 if __name__ == "__main__":
-    ftgpt = FineTunnedGPT("gpt2")
+    # dataset = load_dataset("Den4ikAI/russian_dialogues", streaming=True)
+    # print(next(iter(dataset["train"])))
+
+    ftgpt = FineTunnedGPT("ai-forever/rugpt3large_based_on_gpt2")
     ftgpt.train_tokenizer("tg-parser/train_data/solid_chat.txt")
 
-    ftgpt.train(["tg-parser/train_data/solid_chat.txt"], 3, device="cpu")
+    dataset = TrainDataset(["tg-parser/train_data/solid_chat.txt"], ftgpt.tokenizer)
+    ftgpt.train(dataset, 3, force_train=True, device="cpu")
 
-    print(ftgpt.tokenizer.eos_token, ftgpt.tokenizer.eos_token_id)
     prompt = "бро"
     answer = ftgpt.inference(prompt)
     print(answer)
 
-    prompt = "егэ"
+    prompt = "Сколько у тебя за пробник?"
+    answer = ftgpt.inference(prompt)
+    print(answer)
+
+    prompt = "привет бро, как дела"
     answer = ftgpt.inference(prompt)
     print(answer)
