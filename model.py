@@ -5,7 +5,7 @@ from tokenizers import Tokenizer, models, trainers, pre_tokenizers, processors
 from torch.utils.data import IterableDataset, DataLoader
 from torch import nn
 from torch import optim
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 import os
 
@@ -52,7 +52,7 @@ class FineTunnedGPT:
 
     def train_tokenizer(self, path):
         os.makedirs("save_models", exist_ok=True)
-        save_path = r"save_models\tokenizer_model.json"
+        save_path = r"save_models/tokenizer_model.json"
 
         if not os.path.exists(save_path):
             self.tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
@@ -92,12 +92,12 @@ class FineTunnedGPT:
               epoch=5,
               lr=0.001,
               force_train=False,
-              device="cpu"):
+              device="cpu",
+              save_path=r"save_models/finetune_gpt2"):
 
-        assert torch.device("cuda") == torch.device("cuda" if torch.cuda.is_available() else "cpu"), "Error, wrong device"
+        assert torch.device(device) == torch.device("cuda" if torch.cuda.is_available() else "cpu"), "Error, wrong device"
 
-        os.makedirs("save_models", exist_ok=True)
-        save_path = r"save_models\finetune_gpt2"
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         if device == "cuda":
             scaler = GradScaler()
@@ -113,14 +113,15 @@ class FineTunnedGPT:
             optimizer = optim.Adam(self.trainable_parameters, lr=lr)
 
             epoch_progress_bar = tqdm(range(epoch), desc="Epoch", dynamic_ncols=True)
-            iter_progress_bar = tqdm(dataloader, desc="Iter", total=len(dataloader), leave=False, dynamic_ncols=True)
+            #iter_progress_bar = tqdm(dataloader, desc="Iter", total=len(dataloader), leave=False, dynamic_ncols=True)
             for ep in epoch_progress_bar:
-                for ids, mask, labels in iter_progress_bar:
+                for iteration, batch in enumerate(dataloader):
+                    ids, mask, labels = batch
                     ids = ids.to(device)
                     mask = mask.to(device)
                     labels = labels.to(device)
 
-                    with autocast(enabled=torch.cuda.is_available()):
+                    with autocast(device_type="cuda", enabled=torch.cuda.is_available()):
                         output = self.model(input_ids=ids, attention_mask=mask, labels=labels, past_key_values=None)
                         loss = output.loss
 
@@ -136,8 +137,9 @@ class FineTunnedGPT:
                         optimizer.zero_grad()
 
                     self.train_loss.append(loss.item())
-
-                epoch_progress_bar.set_postfix(loss=self.train_loss[-1])
+                    if iteration % 100 == 0:
+                        print(f"Iteration: {iteration}/{len(dataloader)}, Loss: {loss.item()}")
+                        self.model.save_pretrained(save_path)
 
                 self.model.save_pretrained(save_path)
         else:
