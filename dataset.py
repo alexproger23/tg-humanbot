@@ -9,17 +9,21 @@ class TrainDataset(IterableDataset):
     def __iter__(self):
         for path in self.pathes:
             with open(path, "r", encoding="utf-8") as f:
-                past = f.readline()
-                for line in f:
-                    yield process(past, line, self.tokenizer)
-                    past = line
+                while True:
+                    line1 = f.readline().strip()
+                    line2 = f.readline().strip()
+
+                    if not line1 or not line2:
+                        break
+
+                    yield process(line1, line2, self.tokenizer)
 
     def __len__(self):
         lines = 0
         for path in self.pathes:
             with open(path, "r", encoding="utf-8") as f:
                 lines += len(f.readlines())
-        return lines - 1
+        return lines // 2
 
 class JsonToTxt:
     def __init__(self, dataset, path, tokenizer):

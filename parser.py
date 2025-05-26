@@ -66,8 +66,10 @@ if __name__ == "__main__":
                             solidtext.write(" ")
                             qa_text.write(" ")
 
-                        solidtext.write(message.text.lower())
-                        qa_text.write(message.text.lower())
+                        cleaned_text = '\n'.join(line for line in message.text.split('\n') if line.strip())
+
+                        solidtext.write(cleaned_text)
+                        qa_text.write(cleaned_text)
                         last_sender = message.sender_id
 
             if f:
